@@ -1,3 +1,3 @@
-ampmeter for ATX power supply (using ACS712 sensor and oled display)
-====================
+Ampmeter for ATX power supply (using ACS712 sensor and oled display)
+---------------------
 <img src="assets/proto1.jpg" width="600">
