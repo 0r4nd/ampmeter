@@ -13,4 +13,4 @@ Prototype on breadboard:
 
 Schema:
 ---------------------
-<img src="assets/schema.jpg" width="600">
+<img src="assets/schema.png" width="600">
