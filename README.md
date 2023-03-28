@@ -14,3 +14,7 @@ Prototype on breadboard:
 Schema:
 ---------------------
 <img src="assets/schema.png" width="600">
+
+Module:
+---------------------
+<img src="assets/module.png" width="600">
