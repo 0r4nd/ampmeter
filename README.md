@@ -17,4 +17,4 @@ Schema:
 
 Module:
 ---------------------
-<img src="assets/module.png" width="600">
+<img src="assets/module.png" width="800">
