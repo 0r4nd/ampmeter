@@ -26,20 +26,40 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 
+
+char *ms_format_time(uint32_t ms, char *dst) {
+  uint32_t s = ms / 1000;
+  uint32_t m = s / 60;
+  uint32_t h = m / 60;
+  ms %= 1000;
+  s %= 60;
+  m %= 60;
+  sprintf(dst, "%02lu:%02lu:%02lu", h, m, s);
+  return dst;
+}
+
+char *watt_dtostrf(float watts, char *str) {
+  if (watts < 10) dtostrf(watts, 1, 2, str);
+  else if (watts < 100) dtostrf(watts, 1, 1, str);
+  else dtostrf(watts, 1, 0, str);
+  return str;
+}
+
+
 /*////////////////////////// application ///////////////////////////*/
-void app_timers(TimeInterval *pti, float cur) {
-  uint32_t dt = pti->curTime - pti->prevTime;
-  pti->timers[0] += dt * TimeInterval_timerStatus(pti,0);
-  pti->timers[1] += dt * TimeInterval_timerStatus(pti,1);
+void app_timers(TimeInterval &ti, float cur) {
+  uint32_t dt = ti.getCurTime() - ti.getPrevTime();
+  ti.setTimer(0, ti.getTimer(0) + dt * ti.getTimerStatus(0));
+  ti.setTimer(1, ti.getTimer(1) + dt * ti.getTimerStatus(1));
   
   // current
   if (cur > 0) {
     // start timer 1
-    if (TimeInterval_timerStatus(pti,1) == 0) {
-      TimeInterval_timerOn(pti,1);
-      pti->timers[1] = 0;
+    if (ti.getTimerStatus(1) == 0) {
+      ti.setTimerOn(1);
+      ti.setTimer(1, 0); // set timer 1 to 0
     }
-    TimeInterval_timerOff(pti,0); // reset timer 0
+    ti.setTimerOff(0); // reset timer 0
     
   // no current
   } else {
@@ -47,23 +67,23 @@ void app_timers(TimeInterval *pti, float cur) {
     // reset timer 0 if:
     // - timer 0 is off
     // - timer 1 is on
-    if (TimeInterval_timerStatus(pti,0)==0 && TimeInterval_timerStatus(pti,1)) {
-      TimeInterval_timerOn(pti,0);
-      pti->timers[0] = pti->timers[1]%1000; // fait coincider les timers
+    if (ti.getTimerStatus(0)==0 && ti.getTimerStatus(1)) {
+      ti.setTimerOn(0);
+      ti.setTimer(0, ti.getTimer(1)%1000); // fait coincider les timers
     }
     
-    if (pti->timers[0] >= 6000) { // 5 seconds
-      TimeInterval_timerOff(pti,0);
-      TimeInterval_timerOff(pti,1);
+    if (ti.getTimer(0) >= 6000) { // 5 seconds
+      ti.setTimerOff(0);
+      ti.setTimerOff(1);
     }
   }
 }
 
-void app_display(TimeInterval *pti, Acs712 *pacs) {
+void app_display(TimeInterval &ti, Acs712 &acs) {
   static char buffer_str[20];
   static char amps_str[12];
   static char watts_str[12];
-  float cur = pacs->current_average;
+  float cur = acs.getCurrentAverage();
 
   display.clearDisplay();
   display.setTextSize(2);              // pixel scale
@@ -98,52 +118,41 @@ void app_display(TimeInterval *pti, Acs712 *pacs) {
 
   // mA/h
   display.setCursor(0, 17);
-  sprintf(amps_str, "%smAh", watt_dtostrf(pacs->mAh_per_hour, buffer_str));
+  sprintf(amps_str, "%smAh", watt_dtostrf(acs.getMAhPerHour(), buffer_str));
   display.println(amps_str);
   
   // timer
   display.setCursor(0, 25);
-  display.println(ms_format_time(pti->timers[1], buffer_str));
+  display.println(ms_format_time(ti.getTimer(1), buffer_str));
   //display.println((pacs->mAh_per_hour * 12.0)/1000.0); // w/hour
 
   display.display();
 }
 
-void app_process(TimeInterval *pti, Acs712 *pacs) {
-  uint32_t dt = pti->curTime - pti->prevTime;
-  float current_mA = pacs->current_average * 1000.0;
-  pacs->mAh_per_hour += current_mA * (dt / 3600000.0);
+void app_process(TimeInterval &ti, Acs712 &acs) {
+  uint32_t dt = ti.getCurTime() - ti.getPrevTime();
+  float current_mA = acs.getCurrentAverage() * 1000.0;
+  acs.setMAhPerHour(acs.getMAhPerHour() + current_mA * (dt / 3600000.0));
 }
 
 
-// instances
-TimeInterval inter = {
-  .interval =     200, // 200ms
-  .curTime =      0,
-  .prevTime =     0,
-  .frames =       0,
-  .timers_flags = (0<<0) | (0<<1),
-  .timers =       {0, 0},
-};
 
-Acs712 acs = {
-  .zero_offset =     0.0,
-  .v_per_amp =       0.066, // versions: 5A=0.185v/amp, 20A=0.100v/amp, 30A=0.066v/amp
-  .vref =            5.0,
-  .current_samples = 0.0,
-  .current_average = 0.0,
-  .mAh_per_hour =    0.0,
-  .steps =          1023,
-  .pin =              A0,
-};
+TimeInterval ti(200);
+Acs712 acs(
+  0.066, // versions: 5A=0.185v/amp, 20A=0.100v/amp, 30A=0.066v/amp
+  5.0,
+  1023,
+  A0
+);
+
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("SSD1306 allocation failed"));
-    while(1){} // Don't proceed, loop forever
+    while(1); // Don't proceed, loop forever
   }
   
   display.clearDisplay();
@@ -153,26 +162,26 @@ void setup() {
   display.display();
    
   delay(500);
-  Acs712_setOffset(&acs);
-  TimeInterval_init(&inter);
+  acs.calibrateOffset();
+  ti.init();
 }
 
 
 void loop() {
-  inter.frames++;
-  inter.curTime = millis();
+  ti.setFrames(ti.getFrames()+1);
+  ti.setCurTime(millis());
 
-  if ((inter.curTime - inter.prevTime) > inter.interval) {
-    Acs712_getCurrent(&acs, inter.frames, true);
+  if ((ti.getCurTime() - ti.getPrevTime()) > ti.getInterval()) {
+    acs.getCurrent(ti.getFrames(), true);
     
-    app_timers(&inter, acs.current_average);
-    app_process(&inter, &acs);
-    app_display(&inter, &acs);
+    app_timers(ti, acs.getCurrentAverage());
+    app_process(ti, acs);
+    app_display(ti, acs);
 
-    inter.frames = 0;
-    inter.prevTime = inter.curTime;
-    Acs712_init(&acs);
+    ti.setFrames(0);
+    ti.setPrevTime(ti.getCurTime());
+    acs.init();
   }
 
-  Acs712_update(&acs);
+  acs.update();
 }
